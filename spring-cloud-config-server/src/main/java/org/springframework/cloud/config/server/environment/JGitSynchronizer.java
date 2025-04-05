@@ -24,7 +24,7 @@ public class JGitSynchronizer {
 	 */
 	private long lastRefresh;
 
-	private String uri;
+
 
 	private File workingDirectory;
 
@@ -36,11 +36,10 @@ public class JGitSynchronizer {
 
 	private static final String LOCAL_BRANCH_REF_PREFIX = "refs/remotes/origin/";
 
-	public JGitSynchronizer(JGitRepositoryInterfaceMethodeForSync JGitEnvironmentRepository, Log logger, int refreshRate, String uri, boolean forcePull, File workingDirectory) {
+	public JGitSynchronizer(JGitRepositoryInterfaceMethodeForSync JGitEnvironmentRepository, Log logger, int refreshRate,  boolean forcePull, File workingDirectory) {
 		this.JGitEnvironmentRepository = JGitEnvironmentRepository;
 		this.logger = logger;
 		this.refreshRate = refreshRate;
-		this.uri = uri;
 		this.forcePull = forcePull;
 		this.workingDirectory = workingDirectory;
 	}
@@ -57,7 +56,7 @@ public class JGitSynchronizer {
 				}
 			}
 		} catch (GitAPIException e) {
-			throw new NoSuchRepositoryException("Cannot clone or checkout repository: " + this.getUri(), e);
+			throw new NoSuchRepositoryException("Cannot clone or checkout repository: " + JGitEnvironmentRepository.getUri(), e);
 		}
 	}
 
@@ -187,10 +186,6 @@ public class JGitSynchronizer {
 
 	public void setLastRefresh(long lastRefresh) {
 		this.lastRefresh = lastRefresh;
-	}
-
-	public String getUri() {
-		return uri;
 	}
 
 	public boolean isForcePull() {

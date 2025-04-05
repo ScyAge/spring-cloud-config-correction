@@ -40,10 +40,7 @@ import org.eclipse.jgit.util.FileUtils;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.cloud.config.server.support.GitCredentialsProviderFactory;
 import org.springframework.core.env.ConfigurableEnvironment;
-import org.springframework.core.io.UrlResource;
 import org.springframework.util.Assert;
-import org.springframework.util.ObjectUtils;
-import org.springframework.util.StringUtils;
 
 import static java.lang.String.format;
 
@@ -59,18 +56,20 @@ import static java.lang.String.format;
  * @author ChaoDong Xi
  */
 public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
-		implements EnvironmentRepository, SearchPathLocator, InitializingBean, JGitRepositoryInterfaceMethodeForBranch, JGitRepositoryInterfaceMethodeForSync {
+		implements EnvironmentRepository, SearchPathLocator, InitializingBean, JGitRepositoryInterfaceMethodeForBranch,
+					JGitRepositoryInterfaceMethodeForSync, JGitRepositoryInterfaceMethodeForClone {
 
 	/**
 	 * Error message for URI for git repo.
 	 */
 	public static final String MESSAGE = "You need to configure a uri for the git repository.";
 
-	private static final String FILE_URI_PREFIX = "file:";
+
 
 
 	private final JGitBranchManager JGitBranchManager;
 	private final JGitSynchronizer JGitSynchronizer;
+	private final JGitRepositoryCloner JGitRepositoryCloner;
 
 	/**
 	 * Timeout (in seconds) for obtaining HTTP or SSH connection (if applicable). Default
@@ -115,7 +114,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	private boolean skipSslValidation;
 
 
-
+	private final ObservationRegistry observationRegistry;
 
 	public JGitEnvironmentRepository(ConfigurableEnvironment environment, JGitEnvironmentProperties properties,
 			ObservationRegistry observationRegistry) {
@@ -126,9 +125,13 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 		this.deleteUntrackedBranches = properties.isDeleteUntrackedBranches();
 		this.skipSslValidation = properties.isSkipSslValidation();
 		this.gitFactory = new JGitFactory(properties.isCloneSubmodules());
-		this.JGitBranchManager = new JGitBranchManager(this, this.logger, properties.getDefaultLabel(),
-				properties.isTryMasterBranch());
-		this.JGitSynchronizer = new JGitSynchronizer(this, this.logger,properties.getRefreshRate(),this.getUri(),properties.isForcePull(),this.getWorkingDirectory());
+		this.observationRegistry = observationRegistry;
+		this.JGitBranchManager = new JGitBranchManager(this, this.logger, properties.getDefaultLabel(), properties.isTryMasterBranch());
+
+		this.JGitSynchronizer = new JGitSynchronizer(this, this.logger,properties.getRefreshRate(),properties.isForcePull(), this.getWorkingDirectory());
+		this.JGitRepositoryCloner = new JGitRepositoryCloner(this,this.getBasedir(),this.logger, this.getWorkingDirectory(),this.getDefaultLabel(),this.gitFactory);
+
+
 
 	}
 
@@ -245,7 +248,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	public synchronized void afterPropertiesSet() throws Exception {
 		Assert.state(getUri() != null, MESSAGE);
 		if (this.cloneOnStart) {
-			initClonedRepository();
+			JGitRepositoryCloner.initClonedRepository();
 		}
 	}
 
@@ -257,7 +260,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	public String refresh(String label) {
 		Git git = null;
 		try {
-			git = createGitClient();
+			git = this.createGitClient();
 			if (JGitSynchronizer.shouldPull(git)) {
 				FetchResult fetchStatus = JGitSynchronizer.fetch(git, label);
 				if (this.deleteUntrackedBranches && fetchStatus != null) {
@@ -299,44 +302,6 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	}
 
 
-
-	/**
-	 * Clones the remote repository and then opens a connection to it. Checks out to the
-	 * defaultLabel if specified.
-	 * @throws GitAPIException when cloning fails
-	 * @throws IOException when repo opening fails
-	 */
-	private void initClonedRepository() throws GitAPIException, IOException {
-		if (!getUri().startsWith(FILE_URI_PREFIX)) {
-			deleteBaseDirIfExists();
-			Git git = cloneToBasedir();
-			if (git != null) {
-				git.close();
-			}
-			git = openGitRepository();
-
-			// Check if git points to valid repository and default label is not empty or
-			// null.
-			if (null != git && git.getRepository() != null && !ObjectUtils.isEmpty(getDefaultLabel())) {
-				// Checkout the default branch set for repo in git. This may not always be
-				// master. It depends on the
-				// admin and organization settings.
-				String defaultBranchInGit = git.getRepository().getBranch();
-				// If default branch is not empty and NOT equal to defaultLabel, then
-				// checkout the branch/tag/commit-id.
-				if (!ObjectUtils.isEmpty(defaultBranchInGit)
-						&& !getDefaultLabel().equalsIgnoreCase(defaultBranchInGit)) {
-					JGitBranchManager.checkoutDefaultBranchWithRetry(git);
-				}
-			}
-
-			if (git != null) {
-				git.close();
-			}
-		}
-
-	}
-
 	protected boolean shouldPull(Git git) throws GitAPIException {
 
 		return JGitSynchronizer.shouldPull(git);
@@ -372,13 +337,12 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 			// The only way this can happen is if another JVM (e.g. one that
 			// crashed earlier) created the lock. We can attempt to recover by
 			// wiping the slate clean.
-			this.logger.info("Deleting stale JGit lock file at " + lock);
+			getLogger().info("Deleting stale JGit lock file at " + lock);
 			lock.delete();
 		}
 		if (new File(getWorkingDirectory(), ".git").exists()) {
 			return openGitRepository();
-		}
-		else {
+		} else {
 			return copyRepository();
 		}
 	}
@@ -389,59 +353,16 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	// the first
 	// request).
 	private synchronized Git copyRepository() throws IOException, GitAPIException {
-		deleteBaseDirIfExists();
-		getBasedir().mkdirs();
-		Assert.state(getBasedir().exists(), "Could not create basedir: " + getBasedir());
-		if (getUri().startsWith(FILE_URI_PREFIX)) {
-			return copyFromLocalRepository();
-		}
-		else {
-			return cloneToBasedir();
-		}
+		return JGitRepositoryCloner.copyRepository();
 	}
 
 	private Git openGitRepository() throws IOException {
-		Git git = this.gitFactory.getGitByOpen(getWorkingDirectory());
-		return git;
+		return JGitRepositoryCloner.openGitRepository();
 	}
 
-	private Git copyFromLocalRepository() throws IOException {
-		Git git;
-		File remote = new UrlResource(StringUtils.cleanPath(getUri())).getFile();
-		Assert.state(remote.isDirectory(), "No directory at " + getUri());
-		File gitDir = new File(remote, ".git");
-		Assert.state(gitDir.exists(), "No .git at " + getUri());
-		Assert.state(gitDir.isDirectory(), "No .git directory at " + getUri());
-		git = this.gitFactory.getGitByOpen(remote);
-		return git;
-	}
 
-	private Git cloneToBasedir() throws GitAPIException {
-		CloneCommand clone = this.gitFactory.getCloneCommandByCloneRepository()
-			.setURI(getUri())
-			.setDirectory(getBasedir());
-		configureCommand(clone);
-		try {
-			return clone.call();
-		}
-		catch (GitAPIException e) {
-			this.logger.warn("Error occured cloning to base directory.", e);
-			deleteBaseDirIfExists();
-			throw e;
-		}
-	}
-
-	private void deleteBaseDirIfExists() {
-		if (getBasedir().exists()) {
-			for (File file : getBasedir().listFiles()) {
-				try {
-					FileUtils.delete(file, FileUtils.RECURSIVE);
-				}
-				catch (IOException e) {
-					throw new IllegalStateException("Failed to initialize base directory", e);
-				}
-			}
-		}
+	public void checkoutDefaultBranchWithRetry(Git git) throws GitAPIException {
+		this.JGitBranchManager.checkoutDefaultBranchWithRetry(git);
 	}
 
 	public void configureCommand(TransportCommand<?, ?> command) {

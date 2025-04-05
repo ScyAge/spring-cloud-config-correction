@@ -19,4 +19,6 @@ public interface JGitRepositoryInterfaceMethodeForSync{
 	boolean isDeleteUntrackedBranches();
 
 	void configureCommand(TransportCommand<?, ?> command);
+
+	String getUri();
 }
