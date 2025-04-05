@@ -24,18 +24,18 @@ import static org.eclipse.jgit.transport.ReceiveCommand.Type.DELETE;
 
 public class JGitBranchManager {
 
-	private final JGitRepositoryInterfaceMethode JGitEnvironmentRepository;
+	private final JGitRepositoryInterfaceMethodeForBranch JGitEnvironmentRepository;
 
 	private static final String LOCAL_BRANCH_REF_PREFIX = "refs/remotes/origin/";
 
-	private final boolean isTryMasterBranch;
+	private boolean isTryMasterBranch;
 
 	private Log logger;
 
 	private String defaultLabel;
 
-	public JGitBranchManager(JGitRepositoryInterfaceMethode JGitEnvironmentRepository, Log logger, String defaultLabel,
-			boolean isTryMasterBranch) {
+	public JGitBranchManager(JGitRepositoryInterfaceMethodeForBranch JGitEnvironmentRepository, Log logger, String defaultLabel,
+							 boolean isTryMasterBranch) {
 		this.JGitEnvironmentRepository = JGitEnvironmentRepository;
 		this.logger = logger;
 		this.defaultLabel = defaultLabel;
@@ -164,4 +164,7 @@ public class JGitBranchManager {
 		return isTryMasterBranch;
 	}
 
+	public void setTryMasterBranch(boolean tryMasterBranch) {
+		isTryMasterBranch = tryMasterBranch;
+	}
 }
