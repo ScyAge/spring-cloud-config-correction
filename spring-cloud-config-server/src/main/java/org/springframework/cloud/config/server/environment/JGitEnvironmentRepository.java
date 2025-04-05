@@ -18,36 +18,23 @@ package org.springframework.cloud.config.server.environment;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Collection;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 import io.micrometer.observation.ObservationRegistry;
 import org.apache.commons.logging.Log;
-import org.eclipse.jgit.api.CheckoutCommand;
 import org.eclipse.jgit.api.CloneCommand;
-import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.ListBranchCommand.ListMode;
-import org.eclipse.jgit.api.MergeCommand;
-import org.eclipse.jgit.api.MergeResult;
-import org.eclipse.jgit.api.ResetCommand;
-import org.eclipse.jgit.api.ResetCommand.ResetType;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.api.StatusCommand;
 import org.eclipse.jgit.api.TransportCommand;
 import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.errors.GitAPIException;
-import org.eclipse.jgit.api.errors.JGitInternalException;
 import org.eclipse.jgit.api.errors.RefNotFoundException;
 import org.eclipse.jgit.errors.NoRemoteRepositoryException;
 import org.eclipse.jgit.lib.BranchTrackingStatus;
-import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.FetchResult;
-import org.eclipse.jgit.transport.TagOpt;
-import org.eclipse.jgit.transport.TrackingRefUpdate;
 import org.eclipse.jgit.util.FileUtils;
 
 import org.springframework.beans.factory.InitializingBean;
@@ -72,7 +59,7 @@ import static java.lang.String.format;
  * @author ChaoDong Xi
  */
 public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
-		implements EnvironmentRepository, SearchPathLocator, InitializingBean, JGitRepositoryInterfaceMethode {
+		implements EnvironmentRepository, SearchPathLocator, InitializingBean, JGitRepositoryInterfaceMethodeForBranch, JGitRepositoryInterfaceMethodeForSync {
 
 	/**
 	 * Error message for URI for git repo.
@@ -81,9 +68,9 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 
 	private static final String FILE_URI_PREFIX = "file:";
 
-	private static final String LOCAL_BRANCH_REF_PREFIX = "refs/remotes/origin/";
 
 	private final JGitBranchManager JGitBranchManager;
+	private final JGitSynchronizer JGitSynchronizer;
 
 	/**
 	 * Timeout (in seconds) for obtaining HTTP or SSH connection (if applicable). Default
@@ -91,15 +78,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	 */
 	private int timeout;
 
-	/**
-	 * Time (in seconds) between refresh of the git repository.
-	 */
-	private int refreshRate = 0;
 
-	/**
-	 * Time of the last refresh of the git repository.
-	 */
-	private long lastRefresh;
 
 	/**
 	 * Flag to indicate that the repository should be cloned on startup (not on demand).
@@ -122,11 +101,6 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	 */
 	private TransportConfigCallback transportConfigCallback;
 
-	/**
-	 * Flag to indicate that the repository should force pull. If true discard any local
-	 * changes and take from remote repository.
-	 */
-	private boolean forcePull;
 
 	/**
 	 * Flag to indicate that the branch should be deleted locally if it's origin tracked
@@ -140,34 +114,30 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	 */
 	private boolean skipSslValidation;
 
-	private boolean tryMasterBranch;
 
-	private final ObservationRegistry observationRegistry;
+
 
 	public JGitEnvironmentRepository(ConfigurableEnvironment environment, JGitEnvironmentProperties properties,
 			ObservationRegistry observationRegistry) {
 		super(environment, properties, observationRegistry);
 		this.cloneOnStart = properties.isCloneOnStart();
 		this.defaultLabel = properties.getDefaultLabel();
-		this.forcePull = properties.isForcePull();
 		this.timeout = properties.getTimeout();
 		this.deleteUntrackedBranches = properties.isDeleteUntrackedBranches();
-		this.refreshRate = properties.getRefreshRate();
 		this.skipSslValidation = properties.isSkipSslValidation();
 		this.gitFactory = new JGitFactory(properties.isCloneSubmodules());
-		this.tryMasterBranch = properties.isTryMasterBranch();
-		this.observationRegistry = observationRegistry;
 		this.JGitBranchManager = new JGitBranchManager(this, this.logger, properties.getDefaultLabel(),
 				properties.isTryMasterBranch());
+		this.JGitSynchronizer = new JGitSynchronizer(this, this.logger,properties.getRefreshRate(),this.getUri(),properties.isForcePull(),this.getWorkingDirectory());
 
 	}
 
 	public boolean isTryMasterBranch() {
-		return tryMasterBranch;
+		return JGitBranchManager.isTryMasterBranch();
 	}
 
 	public void setTryMasterBranch(boolean tryMasterBranch) {
-		this.tryMasterBranch = tryMasterBranch;
+		this.JGitBranchManager.setTryMasterBranch(tryMasterBranch);
 	}
 
 	public boolean isCloneOnStart() {
@@ -187,11 +157,11 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	}
 
 	public int getRefreshRate() {
-		return this.refreshRate;
+		return this.JGitSynchronizer.getRefreshRate();
 	}
 
 	public void setRefreshRate(int refreshRate) {
-		this.refreshRate = refreshRate;
+		this.JGitSynchronizer.setRefreshRate(refreshRate);
 	}
 
 	public TransportConfigCallback getTransportConfigCallback() {
@@ -226,12 +196,9 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 		this.defaultLabel = defaultLabel;
 	}
 
-	public boolean isForcePull() {
-		return this.forcePull;
-	}
 
 	public void setForcePull(boolean forcePull) {
-		this.forcePull = forcePull;
+		this.JGitSynchronizer.setForcePull(forcePull);
 	}
 
 	public boolean isDeleteUntrackedBranches() {
@@ -261,7 +228,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 		}
 		catch (Exception e) {
 			if (this.defaultLabel.equals(label) && JGitEnvironmentProperties.MAIN_LABEL.equals(this.defaultLabel)
-					&& tryMasterBranch) {
+					&& this.isTryMasterBranch()) {
 				logger.info("Could not refresh default label " + label, e);
 				logger.info("Will try to refresh master label instead.");
 				version = refresh(JGitEnvironmentProperties.MASTER_LABEL);
@@ -291,8 +258,8 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 		Git git = null;
 		try {
 			git = createGitClient();
-			if (shouldPull(git)) {
-				FetchResult fetchStatus = fetch(git, label);
+			if (JGitSynchronizer.shouldPull(git)) {
+				FetchResult fetchStatus = JGitSynchronizer.fetch(git, label);
 				if (this.deleteUntrackedBranches && fetchStatus != null) {
 					JGitBranchManager.deleteUntrackedLocalBranches(fetchStatus.getTrackingRefUpdates(), git);
 				}
@@ -302,7 +269,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 			// if nothing to update so just checkout and merge.
 			// Merge because remote branch could have been updated before
 			JGitBranchManager.checkout(git, label);
-			tryMerge(git, label);
+			JGitSynchronizer.tryMerge(git, label);
 
 			// always return what is currently HEAD as the version
 			return git.getRepository().findRef("HEAD").getObjectId().getName();
@@ -331,22 +298,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 		}
 	}
 
-	private void tryMerge(Git git, String label) {
-		try {
-			if (JGitBranchManager.isBranch(git, label)) {
-				// merge results from fetch
-				merge(git, label);
-				if (!isClean(git, label)) {
-					this.logger.warn("The local repository is dirty or ahead of origin. Resetting" + " it to origin/"
-							+ label + ".");
-					resetHard(git, label, LOCAL_BRANCH_REF_PREFIX + label);
-				}
-			}
-		}
-		catch (GitAPIException e) {
-			throw new NoSuchRepositoryException("Cannot clone or checkout repository: " + getUri(), e);
-		}
-	}
+
 
 	/**
 	 * Clones the remote repository and then opens a connection to it. Checks out to the
@@ -385,82 +337,14 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 
 	}
 
-	private void checkoutDefaultBranchWithRetry(Git git) throws GitAPIException {
-
-		JGitBranchManager.checkoutDefaultBranchWithRetry(git);
-	}
-
-	/**
-	 * Deletes local branches if corresponding remote branch was removed.
-	 * @param trackingRefUpdates list of tracking ref updates
-	 * @param git git instance
-	 * @return list of deleted branches
-	 */
-	private Collection<String> deleteUntrackedLocalBranches(Collection<TrackingRefUpdate> trackingRefUpdates, Git git) {
-
-		return JGitBranchManager.deleteUntrackedLocalBranches(trackingRefUpdates, git);
-	}
-
-	private List<String> deleteBranches(Git git, Collection<String> branchesToDelete) throws GitAPIException {
-		return JGitBranchManager.deleteBranches(git, branchesToDelete);
-	}
-
-	private Ref checkout(Git git, String label) throws GitAPIException {
-		return JGitBranchManager.checkout(git, label);
-	}
-
 	protected boolean shouldPull(Git git) throws GitAPIException {
-		boolean shouldPull;
 
-		if (this.refreshRate < 0 || (this.refreshRate > 0
-				&& System.currentTimeMillis() - this.lastRefresh < (this.refreshRate * 1000))) {
-			return false;
-		}
-
-		Status gitStatus;
-		try {
-			gitStatus = git.status().call();
-		}
-		catch (JGitInternalException e) {
-			onPullInvalidIndex(git, e);
-			gitStatus = git.status().call();
-		}
-
-		boolean isWorkingTreeClean = gitStatus.isClean();
-		String originUrl = git.getRepository().getConfig().getString("remote", "origin", "url");
-
-		if (this.forcePull && !isWorkingTreeClean) {
-			shouldPull = true;
-			logDirty(gitStatus);
-		}
-		else {
-			shouldPull = isWorkingTreeClean && originUrl != null;
-		}
-		if (!isWorkingTreeClean && !this.forcePull) {
-			this.logger.info("Cannot pull from remote " + originUrl + ", the working tree is not clean.");
-		}
-		return shouldPull;
+		return JGitSynchronizer.shouldPull(git);
 	}
 
-	protected void onPullInvalidIndex(Git git, JGitInternalException e) {
-		if (!e.getMessage().contains("Short read of block.")) {
-			throw e;
-		}
-		if (!this.forcePull) {
-			throw e;
-		}
-		try {
-			new File(getWorkingDirectory(), ".git/index").delete();
-			git.reset().setMode(ResetType.HARD).setRef("HEAD").call();
-		}
-		catch (GitAPIException ex) {
-			e.addSuppressed(ex);
-			throw e;
-		}
-	}
 
 	@SuppressWarnings("unchecked")
-	private void logDirty(Status status) {
+	public void logDirty(Status status) {
 		Set<String> dirties = dirties(status.getAdded(), status.getChanged(), status.getRemoved(), status.getMissing(),
 				status.getModified(), status.getConflicting(), status.getUntracked());
 		this.logger.warn(format("Dirty files found: %s", dirties));
@@ -475,72 +359,12 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 		return dirties;
 	}
 
-	private boolean shouldTrack(Git git, String label) throws GitAPIException {
-		return JGitBranchManager.shouldTrack(git, label);
-	}
 
 	protected FetchResult fetch(Git git, String label) {
-		FetchCommand fetch = git.fetch();
-		fetch.setRemote("origin");
-		fetch.setTagOpt(TagOpt.FETCH_TAGS);
-		fetch.setRemoveDeletedRefs(this.deleteUntrackedBranches);
-		if (this.refreshRate > 0) {
-			this.setLastRefresh(System.currentTimeMillis());
-		}
 
-		configureCommand(fetch);
-		try {
-			FetchResult result = fetch.call();
-			if (result.getTrackingRefUpdates() != null && result.getTrackingRefUpdates().size() > 0) {
-				this.logger.info("Fetched for remote " + label + " and found " + result.getTrackingRefUpdates().size()
-						+ " updates");
-			}
-			return result;
-		}
-		catch (Exception ex) {
-			String message = "Could not fetch remote for " + label + " remote: "
-					+ git.getRepository().getConfig().getString("remote", "origin", "url");
-			warn(message, ex);
-			return null;
-		}
+		return JGitSynchronizer.fetch(git, label);
 	}
 
-	private MergeResult merge(Git git, String label) {
-		try {
-			MergeCommand merge = git.merge();
-			merge.include(git.getRepository().findRef("origin/" + label));
-			MergeResult result = merge.call();
-			if (!result.getMergeStatus().isSuccessful()) {
-				this.logger.warn("Merged from remote " + label + " with result " + result.getMergeStatus());
-			}
-			return result;
-		}
-		catch (Exception ex) {
-			String message = "Could not merge remote for " + label + " remote: "
-					+ git.getRepository().getConfig().getString("remote", "origin", "url");
-			warn(message, ex);
-			return null;
-		}
-	}
-
-	private Ref resetHard(Git git, String label, String ref) {
-		ResetCommand reset = git.reset();
-		reset.setRef(ref);
-		reset.setMode(ResetType.HARD);
-		try {
-			Ref resetRef = reset.call();
-			if (resetRef != null) {
-				this.logger.info("Reset label " + label + " to version " + resetRef.getObjectId());
-			}
-			return resetRef;
-		}
-		catch (Exception ex) {
-			String message = "Could not reset to remote for " + label + " (current ref=" + ref + "), remote: "
-					+ git.getRepository().getConfig().getString("remote", "origin", "url");
-			warn(message, ex);
-			return null;
-		}
-	}
 
 	private Git createGitClient() throws IOException, GitAPIException {
 		File lock = new File(getWorkingDirectory(), ".git/index.lock");
@@ -620,7 +444,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 		}
 	}
 
-	private void configureCommand(TransportCommand<?, ?> command) {
+	public void configureCommand(TransportCommand<?, ?> command) {
 		command.setTimeout(this.timeout);
 		if (this.transportConfigCallback != null) {
 			command.setTransportConfigCallback(this.transportConfigCallback);
@@ -636,7 +460,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 				getPassphrase(), isSkipSslValidation());
 	}
 
-	private boolean isClean(Git git, String label) {
+	public boolean isClean(Git git, String label) {
 		StatusCommand status = git.status();
 		try {
 			BranchTrackingStatus trackingStatus = BranchTrackingStatus.of(git.getRepository(), label);
@@ -658,17 +482,23 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 		}
 	}
 
+	@Override
+	public boolean isBranch(Git git, String label) throws GitAPIException {
+		return this.JGitBranchManager.isBranch(git,label);
+	}
+
 	public long getLastRefresh() {
-		return this.lastRefresh;
+		return this.JGitSynchronizer.getLastRefresh();
 	}
 
 	public void setLastRefresh(long lastRefresh) {
-		this.lastRefresh = lastRefresh;
+		this.JGitSynchronizer.setLastRefresh(lastRefresh);
 	}
 
 	public Log getLogger() {
 		return logger;
 	}
+
 
 	/**
 	 * Wraps the static method calls to {@link org.eclipse.jgit.api.Git} and
