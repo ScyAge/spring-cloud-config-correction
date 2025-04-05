@@ -18,21 +18,17 @@ package org.springframework.cloud.config.server.environment;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 import io.micrometer.observation.ObservationRegistry;
+import org.apache.commons.logging.Log;
 import org.eclipse.jgit.api.CheckoutCommand;
 import org.eclipse.jgit.api.CloneCommand;
-import org.eclipse.jgit.api.CreateBranchCommand.SetupUpstreamMode;
-import org.eclipse.jgit.api.DeleteBranchCommand;
 import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.ListBranchCommand;
 import org.eclipse.jgit.api.ListBranchCommand.ListMode;
 import org.eclipse.jgit.api.MergeCommand;
 import org.eclipse.jgit.api.MergeResult;
@@ -50,7 +46,6 @@ import org.eclipse.jgit.lib.BranchTrackingStatus;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.FetchResult;
-import org.eclipse.jgit.transport.ReceiveCommand;
 import org.eclipse.jgit.transport.TagOpt;
 import org.eclipse.jgit.transport.TrackingRefUpdate;
 import org.eclipse.jgit.util.FileUtils;
@@ -60,12 +55,10 @@ import org.springframework.cloud.config.server.support.GitCredentialsProviderFac
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.io.UrlResource;
 import org.springframework.util.Assert;
-import org.springframework.util.CollectionUtils;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 
 import static java.lang.String.format;
-import static org.eclipse.jgit.transport.ReceiveCommand.Type.DELETE;
 
 /**
  * An {@link EnvironmentRepository} backed by a single git repository.
@@ -79,7 +72,7 @@ import static org.eclipse.jgit.transport.ReceiveCommand.Type.DELETE;
  * @author ChaoDong Xi
  */
 public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
-		implements EnvironmentRepository, SearchPathLocator, InitializingBean {
+		implements EnvironmentRepository, SearchPathLocator, InitializingBean, JGitRepositoryInterfaceMethode {
 
 	/**
 	 * Error message for URI for git repo.
@@ -89,6 +82,8 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	private static final String FILE_URI_PREFIX = "file:";
 
 	private static final String LOCAL_BRANCH_REF_PREFIX = "refs/remotes/origin/";
+
+	private final JGitBranchManager JGitBranchManager;
 
 	/**
 	 * Timeout (in seconds) for obtaining HTTP or SSH connection (if applicable). Default
@@ -162,6 +157,9 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 		this.gitFactory = new JGitFactory(properties.isCloneSubmodules());
 		this.tryMasterBranch = properties.isTryMasterBranch();
 		this.observationRegistry = observationRegistry;
+		this.JGitBranchManager = new JGitBranchManager(this, this.logger, properties.getDefaultLabel(),
+				properties.isTryMasterBranch());
+
 	}
 
 	public boolean isTryMasterBranch() {
@@ -296,14 +294,14 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 			if (shouldPull(git)) {
 				FetchResult fetchStatus = fetch(git, label);
 				if (this.deleteUntrackedBranches && fetchStatus != null) {
-					deleteUntrackedLocalBranches(fetchStatus.getTrackingRefUpdates(), git);
+					JGitBranchManager.deleteUntrackedLocalBranches(fetchStatus.getTrackingRefUpdates(), git);
 				}
 			}
 
 			// checkout after fetch so we can get any new branches, tags, ect.
 			// if nothing to update so just checkout and merge.
 			// Merge because remote branch could have been updated before
-			checkout(git, label);
+			JGitBranchManager.checkout(git, label);
 			tryMerge(git, label);
 
 			// always return what is currently HEAD as the version
@@ -335,7 +333,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 
 	private void tryMerge(Git git, String label) {
 		try {
-			if (isBranch(git, label)) {
+			if (JGitBranchManager.isBranch(git, label)) {
 				// merge results from fetch
 				merge(git, label);
 				if (!isClean(git, label)) {
@@ -376,7 +374,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 				// checkout the branch/tag/commit-id.
 				if (!ObjectUtils.isEmpty(defaultBranchInGit)
 						&& !getDefaultLabel().equalsIgnoreCase(defaultBranchInGit)) {
-					checkoutDefaultBranchWithRetry(git);
+					JGitBranchManager.checkoutDefaultBranchWithRetry(git);
 				}
 			}
 
@@ -388,20 +386,8 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	}
 
 	private void checkoutDefaultBranchWithRetry(Git git) throws GitAPIException {
-		try {
-			checkout(git, getDefaultLabel());
-		}
-		catch (Exception e) {
-			if (JGitEnvironmentProperties.MAIN_LABEL.equals(getDefaultLabel()) && tryMasterBranch) {
-				logger.info("Could not checkout default label " + getDefaultLabel(), e);
-				logger.info("Will try to checkout master label instead.");
-				checkout(git, JGitEnvironmentProperties.MASTER_LABEL);
-			}
-			else {
-				throw e;
-			}
-		}
 
+		JGitBranchManager.checkoutDefaultBranchWithRetry(git);
 	}
 
 	/**
@@ -411,60 +397,16 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	 * @return list of deleted branches
 	 */
 	private Collection<String> deleteUntrackedLocalBranches(Collection<TrackingRefUpdate> trackingRefUpdates, Git git) {
-		if (CollectionUtils.isEmpty(trackingRefUpdates)) {
-			return Collections.emptyList();
-		}
 
-		Collection<String> branchesToDelete = new ArrayList<>();
-		for (TrackingRefUpdate trackingRefUpdate : trackingRefUpdates) {
-			ReceiveCommand receiveCommand = trackingRefUpdate.asReceiveCommand();
-			if (receiveCommand.getType() == DELETE) {
-				String localRefName = trackingRefUpdate.getLocalName();
-				if (StringUtils.startsWithIgnoreCase(localRefName, LOCAL_BRANCH_REF_PREFIX)) {
-					String localBranchName = localRefName.substring(LOCAL_BRANCH_REF_PREFIX.length(),
-							localRefName.length());
-					branchesToDelete.add(localBranchName);
-				}
-			}
-		}
-
-		if (CollectionUtils.isEmpty(branchesToDelete)) {
-			return Collections.emptyList();
-		}
-
-		try {
-			// make sure that deleted branch not a current one
-			checkoutDefaultBranchWithRetry(git);
-			return deleteBranches(git, branchesToDelete);
-		}
-		catch (Exception ex) {
-			String message = format("Failed to delete %s branches.", branchesToDelete);
-			warn(message, ex);
-			return Collections.emptyList();
-		}
+		return JGitBranchManager.deleteUntrackedLocalBranches(trackingRefUpdates, git);
 	}
 
 	private List<String> deleteBranches(Git git, Collection<String> branchesToDelete) throws GitAPIException {
-		DeleteBranchCommand deleteBranchCommand = git.branchDelete()
-			.setBranchNames(branchesToDelete.toArray(new String[0]))
-			// local branch can contain data which is not merged to HEAD - force
-			// delete it anyway, since local copy should be R/O
-			.setForce(true);
-		List<String> resultList = deleteBranchCommand.call();
-		this.logger.info(format("Deleted %s branches from %s branches to delete.", resultList, branchesToDelete));
-		return resultList;
+		return JGitBranchManager.deleteBranches(git, branchesToDelete);
 	}
 
 	private Ref checkout(Git git, String label) throws GitAPIException {
-		CheckoutCommand checkout = git.checkout();
-		if (shouldTrack(git, label)) {
-			trackBranch(git, checkout, label);
-		}
-		else {
-			// works for tags and local branches
-			checkout.setName(label);
-		}
-		return checkout.call();
+		return JGitBranchManager.checkout(git, label);
 	}
 
 	protected boolean shouldPull(Git git) throws GitAPIException {
@@ -534,7 +476,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 	}
 
 	private boolean shouldTrack(Git git, String label) throws GitAPIException {
-		return isBranch(git, label) && !isLocalBranch(git, label);
+		return JGitBranchManager.shouldTrack(git, label);
 	}
 
 	protected FetchResult fetch(Git git, String label) {
@@ -709,36 +651,7 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 		}
 	}
 
-	private void trackBranch(Git git, CheckoutCommand checkout, String label) {
-		checkout.setCreateBranch(true)
-			.setName(label)
-			.setUpstreamMode(SetupUpstreamMode.TRACK)
-			.setStartPoint("origin/" + label);
-	}
-
-	private boolean isBranch(Git git, String label) throws GitAPIException {
-		return containsBranch(git, label, ListMode.ALL);
-	}
-
-	private boolean isLocalBranch(Git git, String label) throws GitAPIException {
-		return containsBranch(git, label, null);
-	}
-
-	private boolean containsBranch(Git git, String label, ListMode listMode) throws GitAPIException {
-		ListBranchCommand command = git.branchList();
-		if (listMode != null) {
-			command.setListMode(listMode);
-		}
-		List<Ref> branches = command.call();
-		for (Ref ref : branches) {
-			if (ref.getName().equals("refs/heads/" + label) || ref.getName().equals("refs/remotes/origin/" + label)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	protected void warn(String message, Exception ex) {
+	public void warn(String message, Exception ex) {
 		this.logger.warn(message);
 		if (this.logger.isDebugEnabled()) {
 			this.logger.debug("Stacktrace for: " + message, ex);
@@ -751,6 +664,10 @@ public class JGitEnvironmentRepository extends AbstractScmEnvironmentRepository
 
 	public void setLastRefresh(long lastRefresh) {
 		this.lastRefresh = lastRefresh;
+	}
+
+	public Log getLogger() {
+		return logger;
 	}
 
 	/**
