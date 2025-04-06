@@ -63,7 +63,7 @@ final class ConfigServerInstanceMonitor implements SmartApplicationListener {
 	@Override
 	public void onApplicationEvent(ApplicationEvent event) {
 		if (event instanceof ContextRefreshedEvent) {
-			startup((ContextRefreshedEvent) event);
+			startup();
 		}
 		else if (event instanceof HeartbeatEvent) {
 			heartbeat((HeartbeatEvent) event);
