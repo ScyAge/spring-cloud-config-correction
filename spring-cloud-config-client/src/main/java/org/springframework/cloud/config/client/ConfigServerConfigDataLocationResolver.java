@@ -202,9 +202,7 @@ public class ConfigServerConfigDataLocationResolver
 
 
 
-	protected Log getLog() {
-		return this.log;
-	}
+
 
 	@Override
 	public boolean isResolvable(ConfigDataLocationResolverContext context, ConfigDataLocation location) {
@@ -333,17 +331,7 @@ public class ConfigServerConfigDataLocationResolver
 			this.bindHandler = bindHandler;
 		}
 
-		public <T> T get(String key, Class<T> type, T defaultValue) {
-			return binder.bind(key, Bindable.of(type)).orElse(defaultValue);
-		}
 
-		public <T> T resolveConfigurationProperties(String prefix, Class<T> type, Supplier<T> defaultValue) {
-			return binder.bind(prefix, Bindable.of(type), bindHandler).orElseGet(defaultValue);
-		}
-
-		public <T> T resolveOrCreateConfigurationProperties(String prefix, Class<T> type) {
-			return binder.bindOrCreate(prefix, Bindable.of(type), bindHandler);
-		}
 
 	}
 

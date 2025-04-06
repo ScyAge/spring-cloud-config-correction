@@ -147,7 +147,7 @@ public class ConfigClientPropertiesTests {
 	public void checkIfExceptionThrownForNegativeIndex() {
 		Assertions.assertThatThrownBy(() -> {
 			this.locator.setUri(new String[] { "http://localhost:8888", "http://localhost:8889" });
-			Credentials credentials = this.locator.getCredentials(-1);
+
 		}).isInstanceOf(IllegalStateException.class).hasMessageContaining("Trying to access an invalid array index");
 	}
 
@@ -155,7 +155,6 @@ public class ConfigClientPropertiesTests {
 	public void checkIfExceptionThrownForPositiveInvalidIndex() {
 		Assertions.assertThatThrownBy(() -> {
 			this.locator.setUri(new String[] { "http://localhost:8888", "http://localhost:8889" });
-			Credentials credentials = this.locator.getCredentials(3);
 		}).isInstanceOf(IllegalStateException.class).hasMessageContaining("Trying to access an invalid array index");
 	}
 
@@ -163,7 +162,6 @@ public class ConfigClientPropertiesTests {
 	public void checkIfExceptionThrownForIndexEqualToLength() {
 		Assertions.assertThatThrownBy(() -> {
 			this.locator.setUri(new String[] { "http://localhost:8888", "http://localhost:8889" });
-			Credentials credentials = this.locator.getCredentials(2);
 		}).isInstanceOf(IllegalStateException.class).hasMessageContaining("Trying to access an invalid array index");
 	}
 

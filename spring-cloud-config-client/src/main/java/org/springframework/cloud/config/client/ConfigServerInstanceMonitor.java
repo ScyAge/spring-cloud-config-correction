@@ -70,7 +70,7 @@ final class ConfigServerInstanceMonitor implements SmartApplicationListener {
 		}
 	}
 
-	public void startup(ContextRefreshedEvent event) {
+	public void startup() {
 		if (refreshOnStartup) {
 			refresh();
 		}

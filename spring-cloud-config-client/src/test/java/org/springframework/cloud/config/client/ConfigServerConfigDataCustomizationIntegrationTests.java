@@ -92,7 +92,6 @@ public class ConfigServerConfigDataCustomizationIntegrationTests {
 	}
 
 	CustomRestTemplate restTemplate(BootstrapContext context) {
-		ConfigClientProperties properties = context.get(ConfigClientProperties.class);
 		String custom = context.get(Binder.class).bind("custom.prop", String.class).orElse("default-custom-prop");
 		return new CustomRestTemplate(custom);
 	}

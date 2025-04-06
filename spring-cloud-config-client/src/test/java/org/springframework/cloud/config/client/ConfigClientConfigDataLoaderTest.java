@@ -85,7 +85,7 @@ public class ConfigClientConfigDataLoaderTest {
 		context.close();
 	}
 
-	SpringApplicationBuilder setup(RestTemplate restTemplate, String... env) {
+	SpringApplicationBuilder setup(RestTemplate restTemplate) {
 		SpringApplicationBuilder builder = new SpringApplicationBuilder(
 				DiscoveryClientConfigDataConfigurationTests.TestConfig.class)
 			.properties("spring.config.import=classpath:applicationname.yaml, optional:configserver:");

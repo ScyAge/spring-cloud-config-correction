@@ -59,9 +59,6 @@ public class ConfigClientRequestTemplateFactory {
 		this.properties = properties;
 	}
 
-	public Log getLog() {
-		return this.log;
-	}
 
 	public ConfigClientProperties getProperties() {
 		return this.properties;

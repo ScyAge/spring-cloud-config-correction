@@ -121,9 +121,7 @@ public class Environment {
 		return this.name;
 	}
 
-	public void setName(String name) {
-		this.name = name;
-	}
+
 
 	public String getLabel() {
 		return this.label;
@@ -137,9 +135,6 @@ public class Environment {
 		return this.profiles;
 	}
 
-	public void setProfiles(String[] profiles) {
-		this.profiles = profiles;
-	}
 
 	public String getVersion() {
 		return this.version;

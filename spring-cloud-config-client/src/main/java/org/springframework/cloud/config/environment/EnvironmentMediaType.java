@@ -25,11 +25,6 @@ package org.springframework.cloud.config.environment;
 public final class EnvironmentMediaType {
 
 	/**
-	 * Constant for the Config Server V1 media type.
-	 */
-	public static final String V1_JSON = "application/vnd.spring-cloud.config-server.v1+json";
-
-	/**
 	 * Constant for the Config Server V2 media type.
 	 */
 	public static final String V2_JSON = "application/vnd.spring-cloud.config-server.v2+json";

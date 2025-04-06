@@ -36,10 +36,6 @@ public final class PropertyValueDescriptor {
 		this.origin = origin;
 	}
 
-	public Object getValue() {
-		return this.value;
-	}
-
 	public String getOrigin() {
 		return this.origin;
 	}

@@ -218,7 +218,6 @@ public class ConfigServerConfigDataLocationResolverTests {
 	void setFailsafeDelegateKeysNotConfigured() {
 		ConfigurableBootstrapContext bootstrapContext = mock(ConfigurableBootstrapContext.class);
 		when(bootstrapContext.isRegistered(eq(ConfigClientProperties.class))).thenReturn(true);
-		KeyProperties keyProperties = new KeyProperties();
 		ConfigClientProperties configClientProperties = new ConfigClientProperties();
 		configClientProperties.setUri(new String[] { "http://myuri" });
 		when(bootstrapContext.isRegistered(TextEncryptor.class)).thenReturn(true);
