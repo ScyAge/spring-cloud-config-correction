@@ -690,10 +690,12 @@ public class VaultEnvironmentProperties implements HttpEnvironmentRepositoryProp
 		 */
 		private String serviceAccountId = "";
 
+
+		private static final int MAX_DURATION_IN_MINUTES = 15;
 		/**
 		 * Validity of the JWT token.
 		 */
-		private Duration jwtValidity = Duration.ofMinutes(15);
+		private Duration jwtValidity = Duration.ofMinutes(MAX_DURATION_IN_MINUTES);
 
 		public GcpCredentials getCredentials() {
 			return this.credentials;

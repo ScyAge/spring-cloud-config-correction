@@ -44,6 +44,8 @@ public class KeyTool {
 
 	private static final long TEN_YEARS = ONE_DAY * 365L * 10L;
 
+	private static final int KEY_SIZE = 1024;
+
 	public KeyAndCert createCA(String ca) throws Exception {
 		KeyPair keyPair = createKeyPair();
 		X509Certificate certificate = createCert(keyPair, ca);
@@ -62,7 +64,7 @@ public class KeyTool {
 	}
 
 	public KeyPair createKeyPair() throws Exception {
-		return createKeyPair(1024);
+		return createKeyPair(KEY_SIZE);
 	}
 
 	public KeyPair createKeyPair(int keySize) throws Exception {

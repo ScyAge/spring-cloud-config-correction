@@ -35,6 +35,7 @@ import org.springframework.util.StringUtils;
 public abstract class PathUtils {
 
 	private static final Log logger = LogFactory.getLog(PathUtils.class);
+	public static final int MAX_CHAR_VALUE = 127;
 
 	private PathUtils() {
 	}
@@ -159,7 +160,7 @@ public abstract class PathUtils {
 			if (path.charAt(i) == '/') {
 				slash = true;
 			}
-			else if (path.charAt(i) > ' ' && path.charAt(i) != 127) {
+			else if (path.charAt(i) > ' ' && path.charAt(i) != MAX_CHAR_VALUE) {
 				if (i == 0 || (i == 1 && slash)) {
 					return path;
 				}
