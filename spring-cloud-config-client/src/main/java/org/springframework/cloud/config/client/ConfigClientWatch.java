@@ -20,8 +20,6 @@ import java.io.Closeable;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import jakarta.annotation.PostConstruct;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 
 import org.springframework.cloud.context.refresh.ContextRefresher;
 import org.springframework.context.EnvironmentAware;
@@ -65,14 +63,14 @@ public class ConfigClientWatch implements Closeable, EnvironmentAware {
 			String oldState = ConfigClientStateHolder.getState();
 
 			// only refresh if state has changed
-			if (stateChanged(oldState, newState)) {
+			if (isStateChanged(oldState, newState)) {
 				ConfigClientStateHolder.setState(newState);
 				this.refresher.refresh();
 			}
 		}
 	}
 
-	/* for testing */ boolean stateChanged(String oldState, String newState) {
+	/* for testing */ boolean isStateChanged(String oldState, String newState) {
 		return (!hasText(oldState) && hasText(newState)) || (hasText(oldState) && !oldState.equals(newState));
 	}
 

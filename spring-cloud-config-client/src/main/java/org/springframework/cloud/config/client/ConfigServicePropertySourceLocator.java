@@ -107,7 +107,7 @@ public class ConfigServicePropertySourceLocator implements PropertySourceLocator
 		ConfigClientProperties properties = this.defaultProperties.override(environment);
 		prepareProfilIfHasText(environment, properties);
 
-		if (verifyApplicationName(properties)) return null;
+		if (isVerifyApplicationName(properties)) return null;
 
 		CompositePropertySource composite = new OriginTrackedCompositePropertySource("configService");
 		ConfigClientRequestTemplateFactory requestTemplateFactory = new ConfigClientRequestTemplateFactory(logger,
@@ -183,7 +183,7 @@ public class ConfigServicePropertySourceLocator implements PropertySourceLocator
 		composite.addFirstPropertySource(new MapPropertySource("configClient", map));
 	}
 
-	private boolean verifyApplicationName(ConfigClientProperties properties) {
+	private boolean isVerifyApplicationName(ConfigClientProperties properties) {
 		if (StringUtils.startsWithIgnoreCase(properties.getName(), "application-")) {
 			InvalidApplicationNameException exception = new InvalidApplicationNameException(properties.getName());
 			if (properties.isFailFast()) {

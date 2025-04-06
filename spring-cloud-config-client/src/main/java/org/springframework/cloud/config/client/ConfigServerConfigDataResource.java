@@ -110,19 +110,19 @@ public class ConfigServerConfigDataResource extends ConfigDataResource {
 		return ObjectUtils.isEmpty(this.getProfiles()) ? DEFAULT_PROFILE : this.getProfiles();
 	}
 
-	private boolean urisEqual(String[] thatUris) {
+	private boolean isUrisEqual(String[] thatUris) {
 		if (this.properties.getUri().length != thatUris.length) {
 			return false;
 		}
 		for (String uri : this.properties.getUri()) {
-			if (Arrays.stream(thatUris).noneMatch(thatUri -> uriEqual(uri, thatUri))) {
+			if (Arrays.stream(thatUris).noneMatch(thatUri -> isUriEqual(uri, thatUri))) {
 				return false;
 			}
 		}
 		return true;
 	}
 
-	private boolean uriEqual(String thisUriString, String thatUriString) {
+	private boolean isUriEqual(String thisUriString, String thatUriString) {
 		try {
 			UriComponents thisUri = UriComponentsBuilder.fromHttpUrl(thisUriString).build();
 			UriComponents thatUri = UriComponentsBuilder.fromHttpUrl(thatUriString).build();
@@ -156,7 +156,7 @@ public class ConfigServerConfigDataResource extends ConfigDataResource {
 			return false;
 		}
 		ConfigServerConfigDataResource that = (ConfigServerConfigDataResource) o;
-		return urisEqual(that.properties.getUri())
+		return isUrisEqual(that.properties.getUri())
 				&& Objects.equals(this.getApplicationName(), that.getApplicationName())
 				&& Objects.equals(this.properties.getLabel(), that.properties.getLabel())
 				&& Objects.equals(this.getProfilesForEquals(), that.getProfilesForEquals())

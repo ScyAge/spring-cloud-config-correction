@@ -26,12 +26,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ConfigClientWatchTests {
 
 	@Test
-	public void stateChangedWorks() {
+	public void isStateChangedWorks() {
 		ConfigClientWatch watch = new ConfigClientWatch(null);
-		assertThat(watch.stateChanged(null, "1")).isTrue();
-		assertThat(watch.stateChanged("1", "2")).isTrue();
-		assertThat(watch.stateChanged("1", null)).isTrue();
-		assertThat(watch.stateChanged("1", "1")).isFalse();
+		assertThat(watch.isStateChanged(null, "1")).isTrue();
+		assertThat(watch.isStateChanged("1", "2")).isTrue();
+		assertThat(watch.isStateChanged("1", null)).isTrue();
+		assertThat(watch.isStateChanged("1", "1")).isFalse();
 		watch.close();
 	}
 
