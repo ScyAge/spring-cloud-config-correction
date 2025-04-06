@@ -106,10 +106,85 @@ public class ConfigServicePropertySourceLocator implements PropertySourceLocator
 	@Retryable(interceptor = "configServerRetryInterceptor")
 	public org.springframework.core.env.PropertySource<?> locate(org.springframework.core.env.Environment environment) {
 		ConfigClientProperties properties = this.defaultProperties.override(environment);
+		prepareProfilIfHasText(environment, properties);
+
+		if (verifyApplicationName(properties)) return null;
+
+		CompositePropertySource composite = new OriginTrackedCompositePropertySource("configService");
+		ConfigClientRequestTemplateFactory requestTemplateFactory = new ConfigClientRequestTemplateFactory(logger,
+				properties);
+
+		try {
+			String[] labels = getLabels(properties);
+			String state = ConfigClientStateHolder.getState();
+
+			CompositePropertySource composite1 = tryGetFirstEnvironmentFromLabel(labels, requestTemplateFactory, state, composite);
+			if (composite1 != null) return composite1;
+
+			handleFail(properties,String.format("None of labels %s found", Arrays.toString(labels)),null);
+		}
+		catch (HttpServerErrorException e) {
+			httpErrorHandler(properties,e);
+		}
+		catch (Exception e) {
+			handleFail(properties,null,e);
+		}
+		return null;
+		
+
+	}
+
+	private void prepareProfilIfHasText(org.springframework.core.env.Environment environment, ConfigClientProperties properties) {
 		if (!StringUtils.hasText(properties.getProfile())) {
 			properties.setProfile(String.join(",", combineProfiles(properties, environment)));
 		}
+	}
 
+	private String[] getLabels(ConfigClientProperties properties) {
+		String[] labels = new String[] { "" };
+		if (StringUtils.hasText(properties.getLabel())) {
+			labels = StringUtils.commaDelimitedListToStringArray(properties.getLabel());
+		}
+		return labels;
+	}
+
+	private CompositePropertySource tryGetFirstEnvironmentFromLabel(String[] labels, ConfigClientRequestTemplateFactory requestTemplateFactory, String state, CompositePropertySource composite) {
+		// Try all the labels until one works
+		for (String label : labels) {
+			Environment result = getRemoteEnvironment(requestTemplateFactory, label.trim(), state);
+			if (result != null) {
+				log(result);
+				environmentAddPropertySource(result, composite);
+				return composite;
+			}
+		}
+		return null;
+	}
+
+	private void environmentAddPropertySource(Environment result, CompositePropertySource composite) {
+		// result.getPropertySources() can be null if using xml
+		if (result.getPropertySources() != null) {
+			for (PropertySource source : result.getPropertySources()) {
+				@SuppressWarnings("unchecked")
+				Map<String, Object> map = translateOrigins(source.getName(),
+						(Map<String, Object>) source.getSource());
+				composite.addPropertySource(new OriginTrackedMapPropertySource(source.getName(), map));
+			}
+		}
+
+		HashMap<String, Object> map = new HashMap<>();
+		if (StringUtils.hasText(result.getState())) {
+			putValue(map, "config.client.state", result.getState());
+		}
+		if (StringUtils.hasText(result.getVersion())) {
+			putValue(map, "config.client.version", result.getVersion());
+		}
+		// the existence of this property source confirms a successful
+		// response from config server
+		composite.addFirstPropertySource(new MapPropertySource("configClient", map));
+	}
+
+	private boolean verifyApplicationName(ConfigClientProperties properties) {
 		if (StringUtils.startsWithIgnoreCase(properties.getName(), "application-")) {
 			InvalidApplicationNameException exception = new InvalidApplicationNameException(properties.getName());
 			if (properties.isFailFast()) {
@@ -118,69 +193,27 @@ public class ConfigServicePropertySourceLocator implements PropertySourceLocator
 			else {
 				logger.warn(NAME_PLACEHOLDER + " resolved to " + properties.getName()
 						+ ", not going to load remote properties. Ensure application name doesn't start with 'application-'");
-				return null;
+				return true;
 			}
 		}
+		return false;
+	}
 
-		CompositePropertySource composite = new OriginTrackedCompositePropertySource("configService");
-		ConfigClientRequestTemplateFactory requestTemplateFactory = new ConfigClientRequestTemplateFactory(logger,
-				properties);
-
-		Exception error = null;
+	private void httpErrorHandler(ConfigClientProperties properties,HttpServerErrorException e) {
 		String errorBody = null;
-		try {
-			String[] labels = new String[] { "" };
-			if (StringUtils.hasText(properties.getLabel())) {
-				labels = StringUtils.commaDelimitedListToStringArray(properties.getLabel());
-			}
-			String state = ConfigClientStateHolder.getState();
-			// Try all the labels until one works
-			for (String label : labels) {
-				Environment result = getRemoteEnvironment(requestTemplateFactory, label.trim(), state);
-				if (result != null) {
-					log(result);
 
-					// result.getPropertySources() can be null if using xml
-					if (result.getPropertySources() != null) {
-						for (PropertySource source : result.getPropertySources()) {
-							@SuppressWarnings("unchecked")
-							Map<String, Object> map = translateOrigins(source.getName(),
-									(Map<String, Object>) source.getSource());
-							composite.addPropertySource(new OriginTrackedMapPropertySource(source.getName(), map));
-						}
-					}
+		if (MediaType.APPLICATION_JSON.includes(e.getResponseHeaders().getContentType())) {
+			errorBody = e.getResponseBodyAsString();
+		}
+		handleFail(properties,errorBody,e);
+	}
 
-					HashMap<String, Object> map = new HashMap<>();
-					if (StringUtils.hasText(result.getState())) {
-						putValue(map, "config.client.state", result.getState());
-					}
-					if (StringUtils.hasText(result.getVersion())) {
-						putValue(map, "config.client.version", result.getVersion());
-					}
-					// the existence of this property source confirms a successful
-					// response from config server
-					composite.addFirstPropertySource(new MapPropertySource("configClient", map));
-					return composite;
-				}
-			}
-			errorBody = String.format("None of labels %s found", Arrays.toString(labels));
-		}
-		catch (HttpServerErrorException e) {
-			error = e;
-			if (MediaType.APPLICATION_JSON.includes(e.getResponseHeaders().getContentType())) {
-				errorBody = e.getResponseBodyAsString();
-			}
-		}
-		catch (Exception e) {
-			error = e;
-		}
+	private void handleFail(ConfigClientProperties properties, String errorBody, Exception error) {
 		if (properties.isFailFast()) {
 			throw new IllegalStateException("Could not locate PropertySource and the fail fast property is set, failing"
 					+ (errorBody == null ? "" : ": " + errorBody), error);
 		}
 		logger.warn("Could not locate PropertySource: " + (error != null ? error.getMessage() : errorBody));
-		return null;
-
 	}
 
 	@Override
